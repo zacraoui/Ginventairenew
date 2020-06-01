@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Coupon;
 use App\Product;
 use Gloudemans\Shoppingcart\Facades\Cart;
 use Illuminate\Http\Request;
@@ -54,6 +55,24 @@ class CartController extends Controller
         return redirect()->route('products.index')->with('success', 'Le produit a bien été ajouté.');
     }
 
+    public function storeCoupon(Request $request)
+    {
+        $code = $request->get('code');
+
+        $coupon = Coupon::where('code', $code)->first();
+
+        if (!$coupon) {
+            return redirect()->back()->with('error', 'Le coupon est invalide.');
+        }
+
+        $request->session()->put('coupon', [
+            'code' => $coupon->code,
+            'remise' => $coupon->discount(Cart::subtotal())
+        ]);
+
+        return redirect()->back()->with('success', 'Le coupon est appliqué.');
+    }
+
     /**
      * Display the specified resource.
      *
@@ -93,13 +112,18 @@ class CartController extends Controller
 
         if ($validates->fails()) {
             Session::flash('error', 'La quantité doit est comprise entre 1 et 5.');
-            return response()->json(['error' => 'La quantité de panier n a pas été mise à jour']);
+            return response()->json(['error' => 'Cart Quantity Has Not Been Updated']);
+        }
+
+        if ($data['qty'] > $data['stock']) {
+            Session::flash('error', 'La quantité de ce produit n\'est pas disponible.');
+            return response()->json(['error' => 'Product Quantity Not Available']);
         }
 
         Cart::update($rowId, $data['qty']);
 
         Session::flash('success', 'La quantité du produit est passée à ' . $data['qty'] . '.');
-        return response()->json(['success' => 'La quantité de panier a été mise à jour']);
+        return response()->json(['success' => 'Cart Quantity Has Been Updated']);
     }
 
     /**
@@ -113,5 +137,12 @@ class CartController extends Controller
         Cart::remove($rowId);
 
         return back()->with('success', 'Le produit a été supprimé.');
+    }
+
+    public function destroyCoupon()
+    {
+        request()->session()->forget('coupon');
+
+        return redirect()->back()->with('success', 'Le coupon a été retiré.');
     }
 }

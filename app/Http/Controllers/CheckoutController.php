@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use DateTime;
 use App\Order;
+use App\Product;
 use Stripe\Stripe;
 use Stripe\PaymentIntent;
 use Illuminate\Support\Arr;
@@ -24,17 +25,24 @@ class CheckoutController extends Controller
             return redirect()->route('products.index');
         }
 
-        Stripe::setApiKey('sk_test_3WteeitM6Wi4AK3SdJzBrm7300qGrAamxX');
+        Stripe::setApiKey('sk_test_lsIwI7kLHVgpDTyumYN5DTBO008UcOzAdz');
+
+        if (request()->session()->has('coupon')) {
+            $total = (Cart::subtotal() - request()->session()->get('coupon')['remise']) + (Cart::subtotal() - request()->session()->get('coupon')['remise']) * (config('cart.tax') / 100);
+        } else {
+            $total = Cart::total();
+        }
 
         $intent = PaymentIntent::create([
-            'amount' => round(Cart::total()),
-            'currency' => 'eur'
+            'amount' => round($total),
+            'currency' => 'MAD'
         ]);
 
         $clientSecret = Arr::get($intent, 'client_secret');
 
         return view('checkout.index', [
-            'clientSecret' => $clientSecret
+            'clientSecret' => $clientSecret,
+            'total' => $total
         ]);
     }
 
@@ -56,6 +64,11 @@ class CheckoutController extends Controller
      */
     public function store(Request $request)
     {
+        if ($this->checkIfNotAvailable()) {
+            Session::flash('error', 'Un produit dans votre panier n\'est plus disponible.');
+            return response()->json(['success' => false], 400);
+        }
+
         $data = $request->json()->all();
 
         $order = new Order();
@@ -82,6 +95,7 @@ class CheckoutController extends Controller
         $order->save();
 
         if ($data['paymentIntent']['status'] === 'succeeded') {
+            $this->updateStock();
             Cart::destroy();
             Session::flash('success', 'Votre commande a été traitée avec succès.');
             return response()->json(['success' => 'Payment Intent Succeeded']);
@@ -138,5 +152,26 @@ class CheckoutController extends Controller
     public function destroy($id)
     {
         //
+    }
+
+    private function checkIfNotAvailable()
+    {
+        foreach (Cart::content() as $item) {
+            $product = Product::find($item->model->id);
+
+            if ($product->stock < $item->qty) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function updateStock()
+    {
+        foreach (Cart::content() as $item) {
+            $product = Product::find($item->model->id);
+            $product->update(['stock' => $product->stock - $item->qty]);
+        }
     }
 }
